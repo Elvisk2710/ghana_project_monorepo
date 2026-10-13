@@ -169,6 +169,11 @@ describe('Slice 6 - MP insights, meetings and policy feedback (no AI provider co
       expect(decided.body.confirmedSlot).toBeTruthy();
     });
 
+    it('lets a citizen read the MP’s published availability without a token', async () => {
+      const r = await http().get(`/api/v1/public/meetings/${mpId}/availability`).expect(200);
+      expect(r.body).toEqual([{ dayOfWeek: 1, startTime: '09:00', endTime: '12:00' }]);
+    });
+
     it('refuses staff from another constituency from deciding this MP’s meetings', async () => {
       const windows = await http().get(`/api/v1/internal/mps/${mpId}/meetings/availability`).set(auth('tok-mp')).expect(200);
       expect(windows.body.length).toBeGreaterThan(0);

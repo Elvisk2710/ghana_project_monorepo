@@ -47,6 +47,13 @@ export class PublicMeetingsController {
   request(@Body() dto: RequestMeetingDto) {
     return this.meetings.request(dto);
   }
+
+  @Public()
+  @Throttle(rate(60))
+  @Get(':mpId/availability')
+  availability(@Param('mpId') mpId: string) {
+    return this.meetings.publicAvailability(mpId);
+  }
 }
 
 /** Staff/MP console: manage availability windows and decide on meeting requests. */

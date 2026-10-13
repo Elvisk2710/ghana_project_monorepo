@@ -38,6 +38,13 @@ export class MeetingsService {
     return this.prisma.mpAvailability.findMany({ where: { mpId }, orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }] });
   }
 
+  /** Public, read-only: the windows a citizen may request a meeting inside, for a published MP only. */
+  async publicAvailability(mpId: string) {
+    const mp = await this.prisma.mp.findUnique({ where: { id: mpId } });
+    if (!mp || !mp.isPublished) throw new NotFoundException('MP not found');
+    return this.prisma.mpAvailability.findMany({ where: { mpId, active: true }, orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }], select: { dayOfWeek: true, startTime: true, endTime: true } });
+  }
+
   async setAvailability(principal: Principal, mpId: string, windows: { dayOfWeek: number; startTime: string; endTime: string }[]) {
     const mp = await this.requireMp(mpId);
     assertConstituencyAccess(principal, mp.constituencyId);

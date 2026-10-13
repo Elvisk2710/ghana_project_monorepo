@@ -1,7 +1,86 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError, ConstituencyMatch, ConstituencyOption, PublicMp } from '../api';
-import { Field, primaryButton } from '../components/Field';
+import { Field, primaryButton, secondaryButton } from '../components/Field';
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Lets a citizen request a meeting inside one of the MP's published weekly availability windows. */
+function RequestMeeting({ mp }: { mp: PublicMp }) {
+  const [open, setOpen] = useState(false);
+  const [windows, setWindows] = useState<{ dayOfWeek: number; startTime: string; endTime: string }[] | null>(null);
+  const [name, setName] = useState('');
+  const [topic, setTopic] = useState('');
+  const [windowIndex, setWindowIndex] = useState('');
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState<{ requestedSlot: string } | null>(null);
+
+  useEffect(() => {
+    if (!open || windows !== null) return;
+    api.mpAvailability(mp.id).then(setWindows).catch(() => setError('The MP’s availability could not be loaded.'));
+  }, [open, windows, mp.id]);
+
+  const chosenWindow = windows?.[Number(windowIndex)];
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !topic.trim() || !chosenWindow || !date || !time) return;
+    const slot = new Date(`${date}T${time}:00Z`);
+    setBusy(true); setError('');
+    try {
+      const r = await api.requestMeeting({ mpId: mp.id, requestedName: name.trim(), topic: topic.trim(), requestedSlot: slot.toISOString() });
+      setDone({ requestedSlot: r.requestedSlot });
+    } catch (err) {
+      setError((err as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return <p className="mt-2"><button type="button" onClick={() => setOpen(true)} className="font-semibold text-parliament-green-deep underline">Request a meeting with {mp.name}</button></p>;
+  }
+
+  if (done) {
+    return <p className="mt-3 rounded-lg bg-green-wash px-4 py-3 text-sm">Your meeting request has been sent. The office will confirm or decline it.</p>;
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-3 grid gap-3 rounded-lg border border-parliament-line bg-paper p-4" noValidate>
+      <p className="text-sm font-semibold">Request a meeting with {mp.name}</p>
+      {windows === null && !error && <p className="text-sm text-ink-soft">Loading available times...</p>}
+      {windows !== null && windows.length === 0 && <p className="text-sm text-ink-soft">This office has not published any available times yet.</p>}
+      {windows !== null && windows.length > 0 && (
+        <>
+          <Field id="meeting-name" label="Your name">{(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />}</Field>
+          <Field id="meeting-topic" label="What is it about?">{(p) => <input {...p} value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={300} />}</Field>
+          <Field id="meeting-window" label="Available time" hint="Pick one of the office's open windows, then choose a date and time inside it.">
+            {(p) => (
+              <select {...p} value={windowIndex} onChange={(e) => setWindowIndex(e.target.value)}>
+                <option value="">Choose a window</option>
+                {windows.map((w, i) => <option key={i} value={i}>{`${DAY_NAMES[w.dayOfWeek]}s, ${w.startTime}–${w.endTime}`}</option>)}
+              </select>
+            )}
+          </Field>
+          {chosenWindow && (
+            <div className="grid grid-cols-2 gap-3">
+              <Field id="meeting-date" label="Date">{(p) => <input {...p} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
+              <Field id="meeting-time" label="Time" hint={`Between ${chosenWindow.startTime} and ${chosenWindow.endTime}`}>{(p) => <input {...p} type="time" min={chosenWindow.startTime} max={chosenWindow.endTime} value={time} onChange={(e) => setTime(e.target.value)} />}</Field>
+            </div>
+          )}
+        </>
+      )}
+      {error && <p role="alert" className="text-sm text-[#8a1c13]">{error}</p>}
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy || !windows?.length} className={primaryButton}>{busy ? 'Sending...' : 'Send request'}</button>
+        <button type="button" onClick={() => setOpen(false)} className={secondaryButton}>Cancel</button>
+      </div>
+    </form>
+  );
+}
 
 type Result =
   | { kind: 'idle' }
@@ -27,6 +106,7 @@ function MpCard({ mp, constituency }: { mp: PublicMp | null; constituency: strin
           {contact.map(([k, v]) => (<div key={k} className="contents"><dt className="font-semibold capitalize">{k}</dt><dd>{v}</dd></div>))}
         </dl>
       )}
+      <RequestMeeting mp={mp} />
     </div>
   );
 }
