@@ -185,8 +185,10 @@ model Mp {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  chairOf     Committee[]       @relation("CommitteeChair")
-  memberships CommitteeMember[]
+  chairOf      Committee[]       @relation("CommitteeChair")
+  memberships  CommitteeMember[]
+  availability MpAvailability[]
+  meetings     Meeting[]
 
   @@index([constituencyId, activeTo])
 }
@@ -224,6 +226,7 @@ model Sitting {
 
   documents ParliamentaryDocument[]
   bills     BillSitting[]
+  summary   SittingSummary?
 
   @@index([date])
 }
@@ -257,6 +260,7 @@ model Bill {
 
   documents ParliamentaryDocument[]
   sittings  BillSitting[]
+  feedback  BillFeedback[]
 }
 
 model ParliamentaryDocument {
@@ -399,6 +403,7 @@ model CitizenCase {
   attachments   CaseAttachment[]
   contact       CaseContact?
   notifications Notification[]
+  meetings      Meeting[]
 
   @@index([retainUntil])
   @@index([constituencyId, status])
@@ -815,4 +820,96 @@ model ErasureLedger {
   erasedAt  DateTime @default(now())
 
   @@index([erasedAt])
+}
+
+// ---------- Phase 2/3 additions: summaries, meetings, feedback ----------
+
+enum SummaryStatus {
+  PENDING
+  AVAILABLE
+  UNAVAILABLE
+}
+
+/// AI-generated per-sitting summary (topics, decisions, MP contributions). Honestly reports
+/// UNAVAILABLE with a reason when no approved AI deployment/provider key is configured, rather
+/// than fabricating a summary — the same honesty pattern used for unsupported languages.
+model SittingSummary {
+  id                String        @id @default(uuid()) @db.Uuid
+  sittingId         String        @unique @db.Uuid
+  sitting           Sitting       @relation(fields: [sittingId], references: [id], onDelete: Cascade)
+  status            SummaryStatus @default(PENDING)
+  topics            Json?
+  decisions         Json?
+  mpContributions   Json?
+  model             String?
+  unavailableReason String?
+  requestedById     String?       @db.Uuid
+  generatedAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+enum MeetingStatus {
+  REQUESTED
+  CONFIRMED
+  DECLINED
+  CANCELLED
+}
+
+/// A recurring weekly availability window an MP (or staff on their behalf) opens for constituency meetings.
+model MpAvailability {
+  id        String   @id @default(uuid()) @db.Uuid
+  mpId      String   @db.Uuid
+  mp        Mp       @relation(fields: [mpId], references: [id], onDelete: Cascade)
+  dayOfWeek Int // 0 = Sunday .. 6 = Saturday
+  startTime String // "HH:mm", 24h
+  endTime   String // "HH:mm", 24h
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([mpId])
+}
+
+/// A citizen's request for a meeting with their MP, checked against the MP's open availability
+/// windows and confirmed or declined by the MP/staff.
+model Meeting {
+  id                String        @id @default(uuid()) @db.Uuid
+  mpId              String        @db.Uuid
+  mp                Mp            @relation(fields: [mpId], references: [id])
+  caseId            String?       @db.Uuid
+  case              CitizenCase?  @relation(fields: [caseId], references: [id])
+  citizenContactRef String?
+  requestedName     String
+  topic             String
+  requestedSlot     DateTime
+  durationMinutes   Int           @default(30)
+  status            MeetingStatus @default(REQUESTED)
+  confirmedSlot     DateTime?
+  staffNote         String?
+  decidedById       String?       @db.Uuid
+  decidedAt         DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([mpId, status])
+}
+
+enum FeedbackSentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+/// Post-enactment citizen feedback on a Bill, closing the policy-impact feedback loop. Collected
+/// only once a Bill reaches an in-force stage; aggregated for staff, never individually attributed
+/// beyond the stored sentiment and optional comment.
+model BillFeedback {
+  id        String            @id @default(uuid()) @db.Uuid
+  billId    String            @db.Uuid
+  bill      Bill              @relation(fields: [billId], references: [id], onDelete: Cascade)
+  sentiment FeedbackSentiment
+  comment   String?
+  createdAt DateTime          @default(now())
+
+  @@index([billId, sentiment])
 }

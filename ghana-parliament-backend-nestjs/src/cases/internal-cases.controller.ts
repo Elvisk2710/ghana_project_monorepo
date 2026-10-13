@@ -129,6 +129,12 @@ export class InternalCasesController {
     return this.cases.respond(p, id, dto, this.cls.get('correlationId'));
   }
 
+  @Get('cases/:id/draft-response')
+  @Roles(...CASE_ROLES)
+  draftResponse(@CurrentUser() p: Principal, @Param('id') id: string) {
+    return this.cases.draftResponse(p, id);
+  }
+
   @Post('cases/:id/escalation')
   @HttpCode(200)
   @Roles(...CASE_ROLES)
