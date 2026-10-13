@@ -6,13 +6,15 @@ import SettingsScreen from './SettingsScreen';
 import { MlOpsScreen } from './AiScreens';
 import { ApprovalsScreen, AuditScreen, OverviewScreen, UsersScreen } from './GovernanceScreens';
 import { BillsScreen, CommitteesScreen, MpsScreen, SittingsScreen } from './RecordsScreens';
+import { HeatmapScreen, MpDashboardScreen } from './InsightsScreens';
+import { MeetingsScreen } from './MeetingsScreen';
 import { AuthCallback, AuthProvider, RequireAuth, SignInPage, useAuth } from './SignIn';
 import { Overview, opsApi } from './api';
 
 const groups: { heading: string; items: readonly (readonly [string, string])[] }[] = [
   { heading: 'Workspace', items: [['Overview', 'overview'], ['Hansard documents', 'documents'], ['Approvals', 'approvals'], ['Users & roles', 'users']] },
-  { heading: 'Parliament', items: [['Sittings', 'sittings'], ['Bills', 'bills'], ['Citizen cases', 'cases'], ['Committees', 'committees'], ['Members of Parliament', 'mps']] },
-  { heading: 'Intelligence', items: [['Audit trail', 'audit'], ['AI governance', 'mlops'], ['Settings', 'settings']] },
+  { heading: 'Parliament', items: [['Sittings', 'sittings'], ['Bills', 'bills'], ['Citizen cases', 'cases'], ['Committees', 'committees'], ['Members of Parliament', 'mps'], ['Meetings', 'meetings']] },
+  { heading: 'Intelligence', items: [['MP dashboard', 'mp-dashboard'], ['National heatmap', 'heatmap'], ['Audit trail', 'audit'], ['AI governance', 'mlops'], ['Settings', 'settings']] },
 ];
 const all = groups.flatMap((g) => g.items);
 
@@ -50,6 +52,9 @@ function Screen({ onOverview }: { onOverview: (o: Overview) => void }) {
     : route === 'bills' ? <BillsScreen />
     : route === 'committees' ? <CommitteesScreen />
     : route === 'mps' ? <MpsScreen />
+    : route === 'meetings' ? <MeetingsScreen />
+    : route === 'mp-dashboard' ? <MpDashboardScreen />
+    : route === 'heatmap' ? <HeatmapScreen />
     : route === 'approvals' ? <ApprovalsScreen />
     : route === 'users' ? <UsersScreen />
     : route === 'audit' ? <AuditScreen />

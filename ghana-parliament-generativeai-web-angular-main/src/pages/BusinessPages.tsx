@@ -120,7 +120,53 @@ export function BillPage() {
         {b.sittings.length ? <ul className="mt-3 grid gap-2">{b.sittings.map((s) => <li key={s.id}><Link to={`/sittings/${s.id}`} className="font-semibold text-parliament-green-deep underline">{s.type} - {fmtDate(s.date)}</Link></li>)}</ul> : <p className="mt-2 text-ink-soft">No published sittings are linked yet.</p>}
       </Section>
       <Section id="docs" title="Official records">{b.documents.length ? <DocList docs={b.documents} /> : <p className="mt-2 text-ink-soft">No published records are linked yet.</p>}</Section>
+      {b.stage === 'ASSENTED' && <Section id="feedback" title="Tell Parliament how this is working"><BillFeedback billId={b.id} /></Section>}
     </Page>
+  );
+}
+
+const SENTIMENTS: { id: 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE'; label: string }[] = [
+  { id: 'POSITIVE', label: 'This is working well' }, { id: 'NEUTRAL', label: 'No strong view' }, { id: 'NEGATIVE', label: 'This is not working' },
+];
+
+/** Closes the policy-impact feedback loop: citizens may say how a now-in-force bill is affecting them. */
+function BillFeedback({ billId }: { billId: string }) {
+  const [sentiment, setSentiment] = useState<'POSITIVE' | 'NEUTRAL' | 'NEGATIVE' | ''>('');
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [thankYou, setThankYou] = useState('');
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!sentiment) return;
+    setBusy(true); setError('');
+    try {
+      const r = await api.submitBillFeedback(billId, { sentiment, comment: comment.trim() || undefined });
+      setThankYou(r.thankYou);
+    } catch (err) {
+      setError((err as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (thankYou) return <p className="mt-2 rounded-lg bg-green-wash px-4 py-3 text-sm">{thankYou}</p>;
+
+  return (
+    <form onSubmit={submit} className="mt-3 grid gap-3" noValidate>
+      <p className="text-ink-soft">This bill has become law. Your response helps Parliament see its real effect.</p>
+      <fieldset className="grid gap-2">
+        <legend className="sr-only">How is this working for you?</legend>
+        {SENTIMENTS.map((s) => (
+          <label key={s.id} className="flex items-center gap-2"><input type="radio" name="sentiment" value={s.id} checked={sentiment === s.id} onChange={() => setSentiment(s.id)} /> {s.label}</label>
+        ))}
+      </fieldset>
+      <label htmlFor="bill-comment" className="text-sm font-semibold">Anything to add? (optional)</label>
+      <textarea id="bill-comment" rows={3} maxLength={1000} value={comment} onChange={(e) => setComment(e.target.value)} className="w-full rounded-lg border border-parliament-line bg-paper px-3 py-2" />
+      {error && <p role="alert" className="text-sm text-[#8a1c13]">{error}</p>}
+      <button type="submit" disabled={busy || !sentiment} className={`${primaryButton} w-fit`}>{busy ? 'Sending...' : 'Send feedback'}</button>
+    </form>
   );
 }
 

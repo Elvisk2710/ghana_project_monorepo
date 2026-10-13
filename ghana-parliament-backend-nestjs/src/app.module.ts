@@ -48,6 +48,15 @@ import { RolesGuard } from './rbac/rbac';
 import { PublicController } from './search/public.controller';
 import { SearchService } from './search/search.service';
 import { MeController } from './users/me.controller';
+import { AiTextService } from './insights/ai-text.service';
+import { InsightsController } from './insights/insights.controller';
+import { InsightsService } from './insights/insights.service';
+import { SummariesController } from './insights/summaries.controller';
+import { SummariesService } from './insights/summaries.service';
+import { InternalMeetingDecisionController, InternalMeetingsController, PublicMeetingsController } from './meetings/meetings.controller';
+import { MeetingsService } from './meetings/meetings.service';
+import { InternalBillFeedbackController, PublicBillFeedbackController } from './feedback/bill-feedback.controller';
+import { BillFeedbackService } from './feedback/bill-feedback.service';
 
 const config = loadConfig();
 
@@ -76,6 +85,13 @@ const config = loadConfig();
     PublicOperationsController,
     GovernanceController,
     SettingsController,
+    InsightsController,
+    SummariesController,
+    PublicMeetingsController,
+    InternalMeetingsController,
+    InternalMeetingDecisionController,
+    PublicBillFeedbackController,
+    InternalBillFeedbackController,
   ],
   providers: [
     { provide: APP_CONFIG, useValue: config },
@@ -105,6 +121,11 @@ const config = loadConfig();
     { provide: NotificationSender, useFactory: () => createSender() },
     StaffAlertService,
     SettingsService,
+    AiTextService,
+    InsightsService,
+    SummariesService,
+    MeetingsService,
+    BillFeedbackService,
     // The baseline generator is always extractive (no model, cannot invent facts). A model is used only
     // when an approved AI deployment selects it (see governance); there is no environment switch for it.
     ExtractiveGenerator,

@@ -166,4 +166,13 @@ export const api = {
     if (!res.ok) throw failure(res, undefined);
     return res.blob();
   },
+
+  // ---- Meeting scheduling: the MP's own published availability, and a citizen's request within it.
+  mpAvailability: (mpId: string) => call<{ dayOfWeek: number; startTime: string; endTime: string }[]>(`/mps/${encodeURIComponent(mpId)}/availability`),
+  requestMeeting: (body: { mpId: string; requestedName: string; topic: string; requestedSlot: string; durationMinutes?: number; citizenContactRef?: string }) =>
+    call<{ id: string; status: string; requestedSlot: string; durationMinutes: number }>('/meetings', { method: 'POST', body: JSON.stringify(body) }),
+
+  // ---- Policy-impact feedback: citizens may respond once a bill is ASSENTED (in force).
+  submitBillFeedback: (billId: string, body: { sentiment: 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE'; comment?: string }) =>
+    call<{ id: string; thankYou: string }>(`/bills/${encodeURIComponent(billId)}/feedback`, { method: 'POST', body: JSON.stringify(body) }),
 };
