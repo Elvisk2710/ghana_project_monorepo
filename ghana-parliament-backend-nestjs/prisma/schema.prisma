@@ -1,0 +1,818 @@
+// Ghana Parliament AI Engagement Platform - core domain schema (T-020).
+// Source: GHANA_PARLIAMENT_AI_PRODUCT_SCOPE.md sec 7.3 (data model minimum).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum Role {
+  PUBLIC
+  STAFF
+  MP
+  RESEARCHER
+  REVIEWER
+  ADMIN
+}
+
+enum DocumentType {
+  HANSARD
+  ORDER_PAPER
+  BILL_TEXT
+  COMMITTEE_REPORT
+  OTHER
+}
+
+// Journey E / Objective 2 lifecycle.
+enum DocumentLifecycle {
+  DRAFT
+  PROCESSING
+  REVIEW
+  APPROVED
+  PUBLISHED
+  SUPERSEDED
+  REJECTED
+}
+
+enum SittingStatus {
+  SCHEDULED
+  HELD
+  CANCELLED
+}
+
+enum BillStage {
+  FIRST_READING
+  COMMITTEE
+  SECOND_READING
+  CONSIDERATION
+  THIRD_READING
+  ASSENTED
+  WITHDRAWN
+}
+
+enum CaseStatus {
+  RECEIVED
+  TRIAGED
+  IN_PROGRESS
+  AWAITING_INFORMATION
+  RESOLVED
+  CLOSED
+}
+
+enum CasePriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum MessageAuthorType {
+  CITIZEN
+  STAFF
+  SYSTEM
+}
+
+enum MessageVisibility {
+  PUBLIC
+  INTERNAL
+}
+
+enum DeliveryState {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum AnswerStatus {
+  GROUNDED
+  NO_EVIDENCE
+  NEEDS_CLARIFICATION
+  CONFLICTING_SOURCES
+  UNSUPPORTED_LANGUAGE
+  SAFETY_REFUSAL
+  SERVICE_UNAVAILABLE
+}
+
+enum ApprovalDecision {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+// ---------- Identity ----------
+
+model User {
+  id             String             @id @default(uuid()) @db.Uuid
+  // OIDC "sub" claim from the Parliament identity provider.
+  externalId     String             @unique
+  email          String             @unique
+  displayName    String
+  roles          Role[]
+  active         Boolean            @default(true)
+  lastLoginAt    DateTime?
+  // Email-and-password sign-in (optional; SSO users have none). scrypt hash, never the password.
+  passwordHash   String?
+  failedLogins   Int                @default(0)
+  lockedUntil    DateTime?
+  // Constituencies a STAFF user may act on (empty = no constituency-scoped access).
+  constituencies UserConstituency[]
+  mp             Mp?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  assignedCases      CitizenCase[]           @relation("CaseAssignee")
+  approvals          Approval[]              @relation("ApprovalApprover")
+  requestedApprovals Approval[]              @relation("ApprovalRequester")
+  documentsOwned     ParliamentaryDocument[] @relation("DocumentOwner")
+  documentsReviewed  ParliamentaryDocument[] @relation("DocumentReviewer")
+}
+
+model UserConstituency {
+  userId         String       @db.Uuid
+  constituencyId String       @db.Uuid
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  constituency   Constituency @relation(fields: [constituencyId], references: [id], onDelete: Cascade)
+
+  @@id([userId, constituencyId])
+}
+
+// ---------- People and representation ----------
+
+model Constituency {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique
+  name      String
+  region    String
+  // Lookup rules / geometry reference; format pending Phase 0 decision on lookup method.
+  lookupRef Json?
+  // Alternative spellings / former names / main towns, used by assisted lookup (T-048).
+  aliases   String[]
+  // Reference to the approved boundary source this row came from (T-049).
+  sourceRef String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mps   Mp[]
+  cases CitizenCase[]
+  staff UserConstituency[]
+
+  @@index([region])
+}
+
+model Mp {
+  id             String       @id @default(uuid()) @db.Uuid
+  officialName   String
+  party          String
+  roleTitle      String?
+  publicContact  Json?
+  activeFrom     DateTime
+  activeTo       DateTime?
+  // Only published MPs appear on the public API (approved source only).
+  isPublished    Boolean      @default(false)
+  userId         String?      @unique @db.Uuid
+  user           User?        @relation(fields: [userId], references: [id])
+  constituencyId String       @db.Uuid
+  constituency   Constituency @relation(fields: [constituencyId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  chairOf     Committee[]       @relation("CommitteeChair")
+  memberships CommitteeMember[]
+
+  @@index([constituencyId, activeTo])
+}
+
+model CommitteeMember {
+  committeeId String    @db.Uuid
+  mpId        String    @db.Uuid
+  role        String    @default("Member")
+  committee   Committee @relation(fields: [committeeId], references: [id], onDelete: Cascade)
+  mp          Mp        @relation(fields: [mpId], references: [id], onDelete: Cascade)
+
+  @@id([committeeId, mpId])
+}
+
+model BillSitting {
+  billId    String  @db.Uuid
+  sittingId String  @db.Uuid
+  bill      Bill    @relation(fields: [billId], references: [id], onDelete: Cascade)
+  sitting   Sitting @relation(fields: [sittingId], references: [id], onDelete: Cascade)
+
+  @@id([billId, sittingId])
+}
+
+// ---------- Parliamentary records ----------
+
+model Sitting {
+  id          String        @id @default(uuid()) @db.Uuid
+  date        DateTime      @db.Date
+  type        String
+  agenda      Json?
+  status      SittingStatus @default(SCHEDULED)
+  isPublished Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  documents ParliamentaryDocument[]
+  bills     BillSitting[]
+
+  @@index([date])
+}
+
+model Committee {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  remit       String?
+  chairMpId   String?  @db.Uuid
+  chair       Mp?      @relation("CommitteeChair", fields: [chairMpId], references: [id])
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bills   Bill[]
+  members CommitteeMember[]
+}
+
+model Bill {
+  id           String     @id @default(uuid()) @db.Uuid
+  title        String
+  sponsor      String?
+  stage        BillStage  @default(FIRST_READING)
+  committeeId  String?    @db.Uuid
+  committee    Committee? @relation(fields: [committeeId], references: [id])
+  isPublished  Boolean    @default(false)
+  introducedOn DateTime?  @db.Date
+  summary      String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  documents ParliamentaryDocument[]
+  sittings  BillSitting[]
+}
+
+model ParliamentaryDocument {
+  id              String            @id @default(uuid()) @db.Uuid
+  // Stable public identifier, e.g. HAN-1000.
+  publicId        String            @unique
+  version         Int               @default(1)
+  sourceUri       String // Alfresco node reference or origin URL; resolved server-side only.
+  type            DocumentType
+  title           String
+  documentDate    DateTime?         @db.Date
+  language        String            @default("en")
+  checksum        String
+  lifecycle       DocumentLifecycle @default(DRAFT)
+  isPublished     Boolean           @default(false)
+  publishedAt     DateTime?
+  sensitivity     String?
+  metadata        Json?
+  // Populated by the ingestion pipeline (T-027).
+  extractedText   String?
+  qualityReport   Json?
+  // Index version currently serving public retrieval for this document version.
+  indexVersion    String?
+  rejectionReason String?
+  sittingId       String?           @db.Uuid
+  sitting         Sitting?          @relation(fields: [sittingId], references: [id])
+  billId          String?           @db.Uuid
+  bill            Bill?             @relation(fields: [billId], references: [id])
+  ownerId         String?           @db.Uuid
+  owner           User?             @relation("DocumentOwner", fields: [ownerId], references: [id])
+  reviewerId      String?           @db.Uuid
+  reviewer        User?             @relation("DocumentReviewer", fields: [reviewerId], references: [id])
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  chunks DocumentChunk[]
+
+  // Duplicate-upload protection: same content cannot be registered twice at the same version.
+  @@unique([checksum, version])
+  @@index([lifecycle, isPublished])
+  @@index([documentDate])
+}
+
+model DocumentChunk {
+  id              String                @id @default(uuid()) @db.Uuid
+  documentId      String                @db.Uuid
+  document        ParliamentaryDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  // Version of the document these chunks were produced from.
+  documentVersion Int
+  sequence        Int
+  text            String
+  anchor          String? // e.g. "page 4, paragraph 2"
+  embeddingId     String?
+  // Dev/default embedding stored inline; swap for pgvector when the provider is chosen (Phase 0 ADR).
+  embedding       Float[]
+  indexVersion    String?
+  language        String                @default("en")
+  createdAt       DateTime              @default(now())
+
+  @@unique([documentId, documentVersion, sequence])
+  @@index([indexVersion])
+}
+
+// ---------- Search and answers ----------
+
+model QuestionSession {
+  id               String       @id @default(uuid()) @db.Uuid
+  // Anonymous session reference; no direct personal identifiers.
+  sessionRef       String?
+  question         String
+  language         String       @default("en")
+  filters          Json?
+  retrievalSet     Json?
+  answer           String?
+  status           AnswerStatus
+  citations        Json?
+  modelVersion     String?
+  promptVersion    String?
+  retrieverVersion String?
+  feedback         Json?
+  correlationId    String?
+  latencyMs        Int?
+  createdAt        DateTime     @default(now())
+  // Phase 5: which approved deployment served this answer (null = built-in baseline), why a
+  // degraded outcome happened, the best retrieval score, and a snapshot of the exact passages
+  // the answer relied on so it can be reconstructed after documents or indexes change.
+  deploymentId     String?      @db.Uuid
+  failureReason    String?
+  topScore         Float?
+  sources          Json?
+  withdrawnAt      DateTime?
+  withdrawnReason  String?
+  incidentId       String?      @db.Uuid
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([deploymentId, createdAt])
+}
+
+// ---------- Citizen engagement ----------
+
+model CitizenCase {
+  id                  String       @id @default(uuid()) @db.Uuid
+  // Reference shown to the citizen, e.g. GH-2026-000123.
+  publicId            String       @unique
+  // Contact details live in a separate protected store; this is a reference only.
+  citizenContactRef   String?
+  // Client-generated retry key: a repeated submit returns the same case instead of a duplicate.
+  submissionKey       String?      @unique
+  title               String       @default("")
+  locationText        String?
+  aiSuggestedSummary  String?
+  // Sensitive/high-risk handling (T-057).
+  escalated           Boolean      @default(false)
+  escalationReason    String?
+  // SLA (T-059): response due date and when staff first responded.
+  dueAt               DateTime?
+  firstResponseAt     DateTime?
+  // Retention (T-058): after this date the personal data is purged.
+  retainUntil         DateTime?
+  anonymizedAt        DateTime?
+  constituencyId      String       @db.Uuid
+  constituency        Constituency @relation(fields: [constituencyId], references: [id])
+  category            String
+  aiSuggestedCategory String?
+  aiConfidence        Float?
+  priority            CasePriority @default(NORMAL)
+  status              CaseStatus   @default(RECEIVED)
+  assigneeId          String?      @db.Uuid
+  assignee            User?        @relation("CaseAssignee", fields: [assigneeId], references: [id])
+  consentGivenAt      DateTime
+  consentPurpose      String
+  preferredLanguage   String       @default("en")
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  closedAt            DateTime?
+
+  messages      CaseMessage[]
+  events        CaseEvent[]
+  attachments   CaseAttachment[]
+  contact       CaseContact?
+  notifications Notification[]
+
+  @@index([retainUntil])
+  @@index([constituencyId, status])
+  @@index([assigneeId, status])
+}
+
+model CaseMessage {
+  id            String            @id @default(uuid()) @db.Uuid
+  caseId        String            @db.Uuid
+  case          CitizenCase       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  authorType    MessageAuthorType
+  authorUserId  String?           @db.Uuid
+  visibility    MessageVisibility
+  content       String
+  channel       String?
+  deliveryState DeliveryState     @default(PENDING)
+  version       Int               @default(1)
+  createdAt     DateTime          @default(now())
+
+  @@index([caseId, createdAt])
+}
+
+// Protected contact store, separate from the case row so it can be purged on its own (T-058).
+model CaseContact {
+  caseId    String      @id @db.Uuid
+  case      CitizenCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  name      String?
+  email     String?
+  phone     String?
+  // EMAIL | SMS | NONE: the citizen's chosen notification channel.
+  channel   String      @default("NONE")
+  createdAt DateTime    @default(now())
+}
+
+// Status history. Append-only by convention; also mirrored in AuditEvent.
+model CaseEvent {
+  id          String      @id @default(uuid()) @db.Uuid
+  caseId      String      @db.Uuid
+  case        CitizenCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  kind        String // created | status | assigned | priority | category | escalated | note | response
+  fromValue   String?
+  toValue     String?
+  actorType   String // citizen | staff | system
+  actorUserId String?     @db.Uuid
+  createdAt   DateTime    @default(now())
+
+  @@index([caseId, createdAt])
+}
+
+enum ScanStatus {
+  PENDING
+  CLEAN
+  REJECTED
+}
+
+model CaseAttachment {
+  id         String      @id @default(uuid()) @db.Uuid
+  caseId     String      @db.Uuid
+  case       CitizenCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  messageId  String?     @db.Uuid
+  filename   String
+  mimeType   String
+  sizeBytes  Int
+  sha256     String
+  scanStatus ScanStatus  @default(PENDING)
+  scanDetail String?
+  // Bytes are kept in the database until an object store is chosen (Phase 0); null once rejected/purged.
+  data       Bytes?
+  createdAt  DateTime    @default(now())
+
+  @@index([caseId])
+}
+
+// Outbox for citizen notifications (T-056). Delivery is performed by a queue job.
+model Notification {
+  id        String        @id @default(uuid()) @db.Uuid
+  caseId    String        @db.Uuid
+  case      CitizenCase   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  kind      String // acknowledgement | status_update | response | follow_up_request
+  channel   String
+  state     DeliveryState @default(PENDING)
+  attempts  Int           @default(0)
+  lastError String?
+  messageId String?       @db.Uuid
+  payload   Json?
+  createdAt DateTime      @default(now())
+  sentAt    DateTime?
+
+  @@index([caseId, createdAt])
+  @@index([state])
+}
+
+// Approved response templates for staff (T-059).
+model MessageTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  body      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------- Governance ----------
+
+model Approval {
+  id            String           @id @default(uuid()) @db.Uuid
+  objectType    String // e.g. "document", "model", "prompt"
+  objectId      String
+  objectVersion String
+  decision      ApprovalDecision @default(PENDING)
+  approverId    String?          @db.Uuid
+  approver      User?            @relation("ApprovalApprover", fields: [approverId], references: [id])
+  // Who asked for the change. The approver must be a different person (four-eyes).
+  requesterId   String?          @db.Uuid
+  requester     User?            @relation("ApprovalRequester", fields: [requesterId], references: [id])
+  action        String           @default("publish")
+  objectLabel   String?
+  reason        String?
+  evidence      Json?
+  decidedAt     DateTime?
+  createdAt     DateTime         @default(now())
+
+  @@index([objectType, objectId])
+  @@index([decision])
+}
+
+// Append-only. UPDATE and DELETE are blocked by a database trigger (see migrations).
+model AuditEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  occurredAt    DateTime @default(now())
+  actorId       String?
+  actorType     String // user | system | anonymous
+  actorRoles    String[]
+  action        String
+  objectType    String?
+  objectId      String?
+  payload       Json?
+  outcome       String   @default("success")
+  requestId     String
+  correlationId String
+  ip            String?
+
+  @@index([objectType, objectId])
+  @@index([actorId, occurredAt])
+  @@index([correlationId])
+  @@index([occurredAt])
+}
+
+// Database-backed job queue for ingestion/indexing (T-030). Claimed with FOR UPDATE SKIP LOCKED.
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  DEAD
+}
+
+model Job {
+  id            String    @id @default(uuid()) @db.Uuid
+  type          String // e.g. "document.extract", "document.index"
+  payload       Json
+  // Idempotency: at most one live job per key.
+  dedupeKey     String?   @unique
+  status        JobStatus @default(PENDING)
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(5)
+  runAt         DateTime  @default(now())
+  lockedAt      DateTime?
+  lastError     String?
+  correlationId String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, runAt])
+}
+
+// ---------- AI governance (Phase 5) ----------
+
+enum AiArtifactKind {
+  MODEL
+  PROMPT
+  RETRIEVER
+  DATASET
+}
+
+enum AiVersionStatus {
+  AVAILABLE
+  RETIRED
+}
+
+enum EvalRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum DeploymentStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUPERSEDED
+  ROLLED_BACK
+  REJECTED
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  MITIGATED
+  RESOLVED
+}
+
+// Immutable once registered: only status/retiredAt/retiredReason may change (database trigger).
+model AiVersion {
+  id            String          @id @default(uuid()) @db.Uuid
+  kind          AiArtifactKind
+  name          String
+  version       String
+  description   String?
+  ownerId       String          @db.Uuid
+  config        Json
+  checksum      String
+  status        AiVersionStatus @default(AVAILABLE)
+  retiredAt     DateTime?
+  retiredReason String?
+  createdAt     DateTime        @default(now())
+
+  cases        EvalCase[]
+  asModel      EvalRun[]      @relation("RunModel")
+  asPrompt     EvalRun[]      @relation("RunPrompt")
+  asRetriever  EvalRun[]      @relation("RunRetriever")
+  asDataset    EvalRun[]      @relation("RunDataset")
+  depModel     AiDeployment[] @relation("DepModel")
+  depPrompt    AiDeployment[] @relation("DepPrompt")
+  depRetriever AiDeployment[] @relation("DepRetriever")
+
+  @@unique([kind, name, version])
+  @@index([kind, status])
+}
+
+model EvalCase {
+  id                  String    @id @default(uuid()) @db.Uuid
+  datasetId           String    @db.Uuid
+  dataset             AiVersion @relation(fields: [datasetId], references: [id])
+  key                 String
+  question            String
+  language            String    @default("en")
+  // Free-text slice label (e.g. a constituency name); a case without one is not part of a constituency slice.
+  constituency        String?
+  tags                String[]
+  // One of the public answer statuses, e.g. grounded, no_evidence, unsupported_language, safety_refusal.
+  expectedStatus      String    @default("grounded")
+  expectedDocumentIds String[]
+  mustContain         String[]
+  mustNotContain      String[]
+
+  results EvalResult[]
+
+  @@unique([datasetId, key])
+}
+
+model EvalRun {
+  id          String        @id @default(uuid()) @db.Uuid
+  datasetId   String        @db.Uuid
+  dataset     AiVersion     @relation("RunDataset", fields: [datasetId], references: [id])
+  modelId     String        @db.Uuid
+  model       AiVersion     @relation("RunModel", fields: [modelId], references: [id])
+  promptId    String        @db.Uuid
+  prompt      AiVersion     @relation("RunPrompt", fields: [promptId], references: [id])
+  retrieverId String        @db.Uuid
+  retriever   AiVersion     @relation("RunRetriever", fields: [retrieverId], references: [id])
+  status      EvalRunStatus @default(QUEUED)
+  total       Int
+  completed   Int           @default(0)
+  startedById String        @db.Uuid
+  thresholds  Json
+  summary     Json?
+  slices      Json?
+  gate        Json?
+  error       String?
+  createdAt   DateTime      @default(now())
+  completedAt DateTime?
+
+  results     EvalResult[]
+  deployments AiDeployment[]
+
+  @@index([status])
+}
+
+model EvalResult {
+  id                   String   @id @default(uuid()) @db.Uuid
+  runId                String   @db.Uuid
+  run                  EvalRun  @relation(fields: [runId], references: [id])
+  caseId               String   @db.Uuid
+  case                 EvalCase @relation(fields: [caseId], references: [id])
+  language             String
+  constituency         String?
+  tags                 String[]
+  expectedStatus       String
+  status               String
+  correct              Boolean
+  statusMatch          Boolean
+  retrievalHit         Boolean?
+  citationOk           Boolean?
+  contentOk            Boolean
+  harmful              Boolean
+  answer               String?
+  citedDocumentIds     String[]
+  retrievedDocumentIds String[]
+  latencyMs            Int
+  inputTokens          Int?
+  outputTokens         Int?
+  createdAt            DateTime @default(now())
+
+  @@unique([runId, caseId])
+}
+
+model AiDeployment {
+  id               String           @id @default(uuid()) @db.Uuid
+  modelId          String           @db.Uuid
+  model            AiVersion        @relation("DepModel", fields: [modelId], references: [id])
+  promptId         String           @db.Uuid
+  prompt           AiVersion        @relation("DepPrompt", fields: [promptId], references: [id])
+  retrieverId      String           @db.Uuid
+  retriever        AiVersion        @relation("DepRetriever", fields: [retrieverId], references: [id])
+  evalRunId        String           @db.Uuid
+  evalRun          EvalRun          @relation(fields: [evalRunId], references: [id])
+  status           DeploymentStatus @default(PENDING_APPROVAL)
+  requesterId      String           @db.Uuid
+  ownerId          String           @db.Uuid
+  approvalId       String?          @unique @db.Uuid
+  // The deployment to return to. Null means the built-in baseline (extractive, no model).
+  rollbackTargetId String?          @db.Uuid
+  // Overrides for the monitoring rules while this deployment is live.
+  thresholds       Json?
+  notes            String?
+  activatedAt      DateTime?
+  endedAt          DateTime?
+  endedReason      String?
+  createdAt        DateTime         @default(now())
+
+  @@index([status])
+}
+
+model MonitorAlert {
+  id               String           @id @default(uuid()) @db.Uuid
+  rule             String
+  // Distinguishes alerts of one rule for different slices, e.g. a language code. Empty when global.
+  scopeKey         String           @default("")
+  severity         IncidentSeverity
+  deploymentId     String?          @db.Uuid
+  metric           String
+  value            Float
+  threshold        Float
+  sampleSize       Int
+  detail           Json?
+  status           AlertStatus      @default(OPEN)
+  firedAt          DateTime         @default(now())
+  lastSeenAt       DateTime         @default(now())
+  acknowledgedById String?          @db.Uuid
+  resolvedAt       DateTime?
+
+  @@index([status, severity])
+}
+
+model AiIncident {
+  id          String           @id @default(uuid()) @db.Uuid
+  title       String
+  description String
+  severity    IncidentSeverity
+  status      IncidentStatus   @default(OPEN)
+  ownerId     String           @db.Uuid
+  reporterId  String           @db.Uuid
+  // Which answers are affected: deploymentId, versions, documentId, from/to, answerIds.
+  scope       Json
+  alertId     String?          @db.Uuid
+  resolution  String?
+  createdAt   DateTime         @default(now())
+  mitigatedAt DateTime?
+  resolvedAt  DateTime?
+
+  @@index([status, severity])
+}
+
+// Small key/value store for operator-controlled switches, e.g. "ai.answering" (the kill switch).
+model SystemFlag {
+  key         String   @id
+  value       Json
+  updatedById String?  @db.Uuid
+  updatedAt   DateTime @default(now()) @updatedAt
+}
+
+/// Append-only record of which cases have had personal data erased. It holds no personal data,
+/// so it can be exported and kept outside the database: after a restore from backup the export
+/// is replayed to erase again whatever the backup resurrected.
+model ErasureLedger {
+  id        String   @id @default(uuid()) @db.Uuid
+  caseId    String   @unique @db.Uuid
+  reference String
+  /// 'retention' (period elapsed) or 'request' (citizen request or correction executed by staff).
+  kind      String
+  erasedAt  DateTime @default(now())
+
+  @@index([erasedAt])
+}

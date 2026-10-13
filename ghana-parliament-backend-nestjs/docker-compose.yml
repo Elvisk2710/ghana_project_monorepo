@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: parliament
+      POSTGRES_PASSWORD: parliament_dev_only
+      POSTGRES_DB: parliament
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parliament"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://parliament:parliament_dev_only@postgres:5432/parliament?schema=public
+    ports:
+      - "3000:3000"
+    profiles: ["full"]   # docker compose --profile full up --build
+
+volumes:
+  pgdata:

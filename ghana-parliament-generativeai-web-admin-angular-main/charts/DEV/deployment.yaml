@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ghana-genai-web-admin-angular-deployment
+  namespace: genai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ghana-genai-web-admin-angular
+  template:
+    metadata:
+      labels:
+        app: ghana-genai-web-admin-angular
+        
+    spec:
+      containers:
+      - name: ghana-genai-web-admin-angular-container
+        image: kaributechsworkflow/ghana-genai-web-admin-angular:fe7d98e2826befad466938f00ded868432b60b87
+        ports:
+        - containerPort: 443

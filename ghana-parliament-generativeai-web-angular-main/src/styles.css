@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cream: #fbf7ef;
+  --color-paper: #ffffff;
+  --color-ink: #1f2421;
+  --color-ink-soft: #54605a;
+  --color-parliament-line: #e7dfd0;
+  --color-parliament-gold: #e0a93b;
+  --color-parliament-gold-deep: #b27d1c;
+  --color-parliament-red: #c8442e;
+  --color-parliament-green: #1f6b4a;
+  --color-parliament-green-deep: #134e36;
+  --color-green-wash: #eaf1ec;
+  --color-gold-wash: #fbf0d8;
+  --font-sans: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --shadow-portal: 0 1px 2px rgb(31 36 33 / 0.04), 0 8px 28px -12px rgb(31 36 33 / 0.16);
+  --radius-portal: 18px;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 1px 1px, rgb(31 36 33 / 0.035) 1px, transparent 0),
+    var(--color-cream);
+  background-size: 22px 22px;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+@layer components {
+  .crest {
+    position: relative;
+    width: 46px;
+    height: 46px;
+    flex: none;
+    overflow: hidden;
+    border-radius: 12px;
+    background: linear-gradient(160deg, var(--color-parliament-green) 0%, var(--color-parliament-green-deep) 100%);
+    box-shadow: var(--shadow-portal);
+  }
+
+  .crest::before {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: radial-gradient(circle at 50% 38%, var(--color-parliament-gold) 0 18%, transparent 19%);
+    content: "";
+  }
+
+  .crest::after {
+    position: absolute;
+    top: 54%;
+    left: 50%;
+    width: 2px;
+    height: 30%;
+    transform: translateX(-50%);
+    background: var(--color-parliament-gold);
+    content: "";
+  }
+
+  .ghana-flag {
+    display: flex;
+    width: 46px;
+    height: 30px;
+    overflow: hidden;
+    border-radius: 5px;
+    box-shadow: var(--shadow-portal);
+  }
+
+  .ghana-flag span {
+    flex: 1;
+  }
+
+  .ghana-flag .gold {
+    position: relative;
+  }
+
+  .ghana-flag .gold::after {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--color-ink);
+    font-size: 13px;
+    content: "*";
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

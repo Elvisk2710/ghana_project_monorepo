@@ -1,0 +1,100 @@
+# Prometheus alerting rules for the Ghana Parliament AI platform (T-081).
+#
+# STATUS: written against the metrics the API actually exposes at /api/v1/metrics (scraped with the
+# METRICS_TOKEN bearer token). These rules have NOT been loaded into a Prometheus/Alertmanager, run
+# through `promtool check rules`, or fired in any environment: no monitoring stack or staging exists
+# yet. Thresholds are placeholders for the operations team to tune. `route` labels come from Express
+# route patterns.
+#
+# Exposed metrics:
+#   http_requests_total{method,route,status}
+#   http_request_duration_seconds_bucket{method,route,le}
+#   ai_alerts_open{rule,severity}      open AI monitoring alerts (see AI_GOVERNANCE.md)
+#   ai_answering_enabled               1 = on, 0 = paused by the kill switch
+#   ops_dead_jobs, ops_failed_notifications, ops_overdue_cases
+# These gauges are refreshed by the monitoring task every MONITOR_INTERVAL_MS (default 5 minutes);
+# they are absent until the first run after a restart.
+
+groups:
+  - name: parliament-availability
+    rules:
+      - alert: ApiDown
+        expr: up{job="parliament-api"} == 0
+        for: 2m
+        labels: { severity: high }
+        annotations:
+          summary: The Parliament API is not reachable
+          runbook: docs/RUNBOOKS.md#5-the-api-will-not-start-or-is-not-ready
+
+      - alert: ApiServerErrors
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+        for: 10m
+        labels: { severity: high }
+        annotations:
+          summary: More than 5% of API requests are failing
+          runbook: docs/RUNBOOKS.md#5-the-api-will-not-start-or-is-not-ready
+
+      - alert: PublicAskSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{method="POST",route="/api/v1/public/answers"}[10m]))) > 5
+        for: 10m
+        labels: { severity: medium }
+        annotations:
+          summary: Public questions are slow (p95 above 5 seconds)
+          runbook: docs/RUNBOOKS.md#3-a-monitoring-alert-is-open
+
+  - name: parliament-ai
+    rules:
+      - alert: AiAnsweringPaused
+        expr: ai_answering_enabled == 0
+        for: 0m
+        labels: { severity: medium }
+        annotations:
+          summary: Public answering is paused
+          description: Someone used the kill switch. Check the open incident and resume when it is safe.
+          runbook: docs/RUNBOOKS.md#1-an-answer-is-wrong-harmful-or-exposes-something-it-should-not-ai-incident
+
+      - alert: AiMonitoringHigh
+        expr: sum(ai_alerts_open{severity=~"HIGH|CRITICAL"}) > 0
+        for: 5m
+        labels: { severity: high }
+        annotations:
+          summary: A high-severity AI quality or safety alert is open
+          runbook: docs/RUNBOOKS.md#3-a-monitoring-alert-is-open
+
+      - alert: AiMonitoringStale
+        expr: absent(ai_answering_enabled)
+        for: 15m
+        labels: { severity: medium }
+        annotations:
+          summary: The AI monitoring task has not reported (restart, crash, or JOBS_ENABLED=false)
+          description: Without it, quality and bias alerts are not being evaluated.
+
+  - name: parliament-operations
+    rules:
+      - alert: DeadBackgroundJobs
+        expr: ops_dead_jobs > 0
+        for: 15m
+        labels: { severity: medium }
+        annotations:
+          summary: Background jobs have failed permanently
+          runbook: docs/RUNBOOKS.md#6-background-jobs-are-failing-dead-jobs
+
+      - alert: CitizenNotificationsFailing
+        expr: ops_failed_notifications > 0
+        for: 30m
+        labels: { severity: medium }
+        annotations:
+          summary: Messages to citizens are failing to send
+          runbook: docs/RUNBOOKS.md#7-citizen-notifications-are-failing
+
+      - alert: CitizenCasesOverdue
+        expr: ops_overdue_cases > 0
+        for: 1h
+        labels: { severity: medium }
+        annotations:
+          summary: Citizen cases are past their response deadline
+          runbook: docs/RUNBOOKS.md#8-cases-are-overdue-or-an-emergency-was-submitted
+
+# NOT covered by these rules (no metric exists yet): a new or escalated case waiting for someone,
+# database disk and connections (use the database provider's monitoring), backup success and age,
+# certificate expiry, and the identity provider's availability.
