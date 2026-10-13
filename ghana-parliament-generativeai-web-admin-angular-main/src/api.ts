@@ -233,6 +233,76 @@ export const opsApi = {
   },
 };
 
+// ---- Insights: MP dashboard, issue clustering, national heatmap, sentiment
+export interface CategoryCount { category: string; count: number }
+export interface TrendingTopic { category: string; count: number; previousCount: number; change: number }
+export type Sentiment =
+  | { available: false; reason: string }
+  | { available: true; overallScore: number; label: string; topConcern: string | null; summary: string | null; sampleSize: number; model: string };
+export interface MpOverview {
+  constituency: { id: string; name: string; region: string };
+  openCases: number;
+  topConcerns: CategoryCount[];
+  trendingTopics: TrendingTopic[];
+  sentiment: Sentiment;
+  measuredAt: string;
+}
+export interface IssueCluster { category: string; count: number; overdue: number; escalated: number; urgent: boolean }
+export interface HeatmapRegion { region: string; openCases: number; overdue: number; escalated: number; severity: number; topCategory: string | null }
+
+export const insightsApi = {
+  mpOverview: (constituencyId: string) => call<MpOverview>(`/insights/mp-overview${query({ constituencyId })}`),
+  clusters: (constituencyId: string) => call<IssueCluster[]>(`/insights/clusters${query({ constituencyId })}`),
+  sentiment: (constituencyId: string) => call<Sentiment>(`/insights/sentiment${query({ constituencyId })}`),
+  heatmap: () => call<HeatmapRegion[]>('/insights/heatmap'),
+};
+
+// ---- Per-sitting AI summarization
+export type SummaryStatus = 'PENDING' | 'AVAILABLE' | 'UNAVAILABLE';
+export interface SittingSummary {
+  status: SummaryStatus;
+  topics: string[] | null;
+  decisions: string[] | null;
+  mpContributions: { mp: string; point: string }[] | null;
+  model: string | null;
+  unavailableReason: string | null;
+  generatedAt: string | null;
+}
+export const summariesApi = {
+  get: (sittingId: string) => call<SittingSummary | null>(`/sittings/${sittingId}/summary`),
+  request: (sittingId: string) => post<SittingSummary>(`/sittings/${sittingId}/summary`),
+};
+
+// ---- AI-drafted case responses
+export type DraftResponse = { available: false; reason: string } | { available: true; draft: string; model: string; note: string };
+export const draftResponseApi = {
+  get: (caseId: string) => call<DraftResponse>(`/cases/${caseId}/draft-response`),
+};
+
+// ---- Meetings: MP availability windows and citizen requests
+export type MeetingStatus = 'REQUESTED' | 'CONFIRMED' | 'DECLINED' | 'CANCELLED';
+export interface AvailabilityWindow { id?: string; dayOfWeek: number; startTime: string; endTime: string }
+export interface MeetingRow {
+  id: string; requestedName: string; topic: string; requestedSlot: string; durationMinutes: number;
+  status: MeetingStatus; confirmedSlot: string | null; staffNote: string | null; createdAt: string;
+}
+export const meetingsApi = {
+  availability: (mpId: string) => call<AvailabilityWindow[]>(`/mps/${mpId}/meetings/availability`),
+  setAvailability: (mpId: string, windows: AvailabilityWindow[]) => post<AvailabilityWindow[]>(`/mps/${mpId}/meetings/availability`, { windows }),
+  list: (mpId: string, status?: MeetingStatus) => call<MeetingRow[]>(`/mps/${mpId}/meetings${query({ status })}`),
+  decide: (id: string, decision: 'CONFIRMED' | 'DECLINED', note?: string) => call<MeetingRow>(`/meetings/${id}`, { method: 'PATCH', body: JSON.stringify({ decision, note }) }),
+  cancel: (id: string) => call<MeetingRow>(`/meetings/${id}/cancel`, { method: 'PATCH', body: JSON.stringify({}) }),
+};
+
+// ---- Policy-impact feedback (internal view of citizen feedback on an in-force bill)
+export interface BillFeedbackSummary {
+  billId: string; total: number; byLabel: Record<'POSITIVE' | 'NEUTRAL' | 'NEGATIVE', number>;
+  recentComments: { sentiment: string; comment: string; createdAt: string }[];
+}
+export const billFeedbackApi = {
+  summary: (billId: string) => call<BillFeedbackSummary>(`/bills/${billId}/feedback`),
+};
+
 // ---- Settings and erasure ledger
 export type SettingSource = 'database' | 'environment' | 'default';
 export interface CaseSettings { retentionDays: number; slaHours: number; slaUrgentHours: number }

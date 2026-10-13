@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { TokenBox } from './DocumentsScreen';
 import {
-  ApiError, Assignee, CaseDetail, CaseFilters, CasePriority, CaseRow, CaseStats, CaseStatus, Me, Template, casesApi,
+  ApiError, Assignee, CaseDetail, CaseFilters, CasePriority, CaseRow, CaseStats, CaseStatus, Me, Template, casesApi, draftResponseApi,
 } from './api';
 
 export const STATUS_LABEL: Record<CaseStatus, string> = {
@@ -166,6 +166,21 @@ function CaseView({ id, onBack }: { id: string; onBack: () => void }) {
   const [reply, setReply] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [draftBusy, setDraftBusy] = useState(false);
+  const [draftNote, setDraftNote] = useState('');
+
+  const requestDraft = async () => {
+    setDraftBusy(true); setDraftNote('');
+    try {
+      const r = await draftResponseApi.get(id);
+      if (r.available) { setReply(r.draft); setDraftNote(r.note); }
+      else setDraftNote(r.reason);
+    } catch (e) {
+      setDraftNote((e as ApiError).message);
+    } finally {
+      setDraftBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -333,12 +348,16 @@ function CaseView({ id, onBack }: { id: string; onBack: () => void }) {
           <>
             <div className="reply">
               <label htmlFor="reply">Response to the citizen (they will see this)</label>
-              {templates.length > 0 && (
-                <select aria-label="Insert a template" value="" onChange={(e) => { const t = templates.find((x) => x.id === e.target.value); if (t) setReply(t.body); }}>
-                  <option value="">Insert an approved template...</option>
-                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-              )}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {templates.length > 0 && (
+                  <select aria-label="Insert a template" value="" onChange={(e) => { const t = templates.find((x) => x.id === e.target.value); if (t) setReply(t.body); }}>
+                    <option value="">Insert an approved template...</option>
+                    {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                )}
+                <button type="button" className="btn ghost sm" disabled={draftBusy || blockedByEscalation} onClick={requestDraft}>{draftBusy ? 'Asking AI...' : 'Get an AI-drafted suggestion'}</button>
+              </div>
+              {draftNote && <p className="sub" role="status">{draftNote}</p>}
               <textarea id="reply" rows={4} value={reply} onChange={(e) => setReply(e.target.value)} disabled={blockedByEscalation} aria-describedby={blockedByEscalation ? 'reply-block' : undefined} />
               {blockedByEscalation && <p id="reply-block" className="sub">This case is escalated, so only the MP or an administrator can send a response.</p>}
               <button type="button" className="btn" disabled={busy || blockedByEscalation || !reply.trim()} onClick={() => act('Response sent.', async () => { const r = await casesApi.respond(id, { content: reply.trim() }); setReply(''); return r; })}>Send response</button>
